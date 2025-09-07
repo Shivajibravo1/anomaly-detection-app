@@ -1,0 +1,8 @@
+[server]
+enableXsrfProtection = true
+headless = true
+runOnSave = false
+
+[theme]
+base = "light"
+primaryColor = "#0f62fe"

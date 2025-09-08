@@ -19,8 +19,8 @@ from sklearn.metrics import classification_report, confusion_matrix
 # OpenAI SDK (Responses API) — requires openai>=1.0 in requirements.txt
 from openai import OpenAI
 
-st.set_page_config(page_title="Network Log Anomaly Detection", layout="wide")
-st.title("🔍 Network Log Anomaly Detection")
+st.set_page_config(page_title="Anomaly Detection Application", layout="wide")
+st.title("🔍 Anomaly Detection Application by Shivaji P, IT PM")
 st.caption("Robust loader, business charts, safe stats, downloads, and an OpenAI-generated executive summary.")
 
 # --- Session state for run results & summaries ---

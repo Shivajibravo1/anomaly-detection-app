@@ -451,7 +451,7 @@ if st.session_state.run_ready and st.session_state.ctx:
     col_a.metric("Mode", c.get("mode", "-"))
     col_b.metric("Total", f"{c.get('total', 0):,}")
     col_c.metric("Anomalies", f"{c.get('anomalies', 0):,}")
-    col_d.metric("Anomaly Rate", f"{c.get('pct', 0.0)::.2f}%")
+    col_d.metric("Anomaly Rate", f"{c.get('pct', 0.0):.2f}%")
     st.success("Ready for AI summary and downloads.")
 else:
     st.warning("Run a model first (Supervised or Unsupervised) to populate key figures.")

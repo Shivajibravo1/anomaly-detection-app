@@ -1,4 +1,4 @@
-# app.py — Streamlit Anomaly Detection (Robust Loader • Plotly UI • AI Summary • Sanity Panel)
+# app.py — Streamlit Anomaly Detection (Robust Loader • Plotly • Safe Stats • AI Summary • Sanity Panel)
 
 # --- NumPy 2.x compat shim (safe no-op on NumPy 1.x) ---
 import numpy as np
@@ -16,13 +16,12 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
-# OpenAI SDK (Responses API)
-# pip install openai
+# OpenAI SDK (Responses API). requirements.txt should pin openai>=1.0
 from openai import OpenAI
 
-st.set_page_config(page_title="Anomaly Detection Application by Shivaji P, IT PM", layout="wide")
+st.set_page_config(page_title="Network Log Anomaly Detection", layout="wide")
 st.title("🔍 Network Log Anomaly Detection")
-st.caption("Beginner-friendly UI with tooltips, business charts, downloads, and an OpenAI-generated professional summary.")
+st.caption("Robust loader, business charts, safe stats, downloads, and an OpenAI-generated executive summary.")
 
 # --- Session state for run results & summaries ---
 if "run_ready" not in st.session_state:
@@ -81,7 +80,7 @@ def build_business_summary(total, anomalies, pct, top_features=None, extra_notes
     return "\n".join(lines)
 
 def make_ai_prompt(context: dict) -> str:
-    """Construct a concise, professional prompt for OpenAI to produce a board-ready summary."""
+    """Construct an executive-ready prompt for OpenAI."""
     mode = context.get("mode")
     total = context.get("total")
     anomalies = context.get("anomalies")
@@ -90,7 +89,6 @@ def make_ai_prompt(context: dict) -> str:
     tf_str = ", ".join(tf[:8]) if tf else "N/A"
     trends = "Yes" if context.get("has_trend") else "No"
     notes = context.get("notes") or ""
-
     return f"""
 You are a senior cybersecurity analyst. Write a crisp, executive-ready summary (180-220 words) for business leaders.
 Data context:
@@ -105,9 +103,9 @@ Write in a confident, professional tone. Use **5 sections** with bold labels:
 
 1) **Overview:** What was analyzed and how.
 2) **Key Findings:** Quantify anomalies, notable spikes/trends, and signal drivers.
-3) **Business Impact:** What this means for risk, operations, or compliance.
-4) **Likely Causes:** Plausible explanations (ex: misconfig, brute force, policy gaps).
-5) **Immediate Mitigations & Next Steps:** 4–6 bullet points, action-oriented and pragmatic.
+3) **Business Impact:** Implications for risk, operations, or compliance.
+4) **Likely Causes:** Plausible explanations (e.g., misconfig, brute force, policy gaps).
+5) **Immediate Mitigations & Next Steps:** 4–6 bullets, action-oriented and pragmatic.
 
 Keep jargon minimal. Avoid code. No preambles or closings.
 """
@@ -127,15 +125,34 @@ def openai_summarize(api_key: str, model: str, prompt: str) -> str:
             text = "Unable to parse model output."
     return text
 
+# --- Safe numeric summary helpers (prevents KeyError) ---
+def safe_numeric_subset(df: pd.DataFrame, cols) -> pd.DataFrame:
+    """Return only existing, numeric columns from `cols`. Empty DF if none."""
+    if cols is None:
+        return pd.DataFrame()
+    wanted = [c for c in list(cols) if c in df.columns]
+    if not wanted:
+        return pd.DataFrame()
+    numeric = df[wanted].select_dtypes(include="number")
+    return numeric if not numeric.empty else pd.DataFrame()
+
+def concise_stats(df: pd.DataFrame, cols) -> pd.DataFrame:
+    """describe().T + missing% for a safe numeric subset."""
+    sub = safe_numeric_subset(df, cols)
+    if sub.empty:
+        return pd.DataFrame()
+    stats = sub.describe().T
+    stats["missing_%"] = (1 - sub.count() / len(sub)) * 100
+    return stats
+
 # ------------------------------------------------------------------------------------
 # Sidebar: Upload & Preview
 # ------------------------------------------------------------------------------------
 with st.sidebar:
-    st.header("1) Upload", help="Upload a CSV/TSV/LOG export. Auto-detects delimiter/encoding and skips bad lines.")
+    st.header("1) Upload", help="Upload CSV/TSV/LOG. Auto-detects delimiter & encoding, skips bad lines.")
     up = st.file_uploader("Upload network log", type=["csv", "tsv", "log"],
                           help="Drag & drop or browse a log file from firewall/router/SIEM/etc.")
-    preview_n = st.slider("Preview rows", 5, 100, 25, 5,
-                          help="How many rows of the raw data to preview.")
+    preview_n = st.slider("Preview rows", 5, 100, 25, 5, help="How many rows of the raw data to preview.")
 
 if not up:
     st.info("Please upload a file to begin.")
@@ -168,6 +185,23 @@ for c in time_like_cols:
     if dt.notna().any():
         event_time_dt = dt
         break
+
+# ------------------------------------------------------------------------------------
+# Quick stats selector (SAFE)
+# ------------------------------------------------------------------------------------
+numeric_options = sorted(df.select_dtypes(include="number").columns.tolist())
+selected_num_cols = st.multiselect(
+    "Columns to summarize (numeric only)",
+    options=numeric_options,
+    default=numeric_options[: min(6, len(numeric_options))],
+    help="Pick numeric columns to see quick stats. Empty if none."
+)
+stats_df = concise_stats(df, selected_num_cols)
+if stats_df.empty:
+    st.warning("No numeric columns available from the current selection to summarize.")
+else:
+    st.subheader("📋 Quick Numeric Summary (safe)")
+    st.dataframe(stats_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------------
 # Labels (optional)
@@ -212,7 +246,7 @@ for c in df_model.columns:
 X = df_model.select_dtypes(include=['number']).fillna(0.0)
 
 if X.empty or X.shape[1] == 0:
-    st.error("No numeric features after preprocessing. Adjust your drop rules or provide numeric columns.")
+    st.error("No numeric features after preprocessing. Adjust drop rules or provide numeric columns.")
     st.stop()
 
 st.write("**Modeling frame shape**:", X.shape)
@@ -423,12 +457,15 @@ else:
 st.markdown("---")
 st.subheader("🧠 Executive Summary (OpenAI)")
 
-api_key = st.text_input(
-    "OpenAI API Key",
+# Prefer secrets on Streamlit Cloud; fall back to UI
+key_from_secret = st.secrets.get("OPENAI_API_KEY", None)
+key_from_ui = st.text_input(
+    "OpenAI API Key (optional if set in Secrets)",
     type="password",
     placeholder="sk-...",
     help="Used only to generate the summary. Not stored."
 )
+api_key = key_from_secret or key_from_ui
 
 model_name = st.selectbox(
     "Model",
@@ -443,7 +480,7 @@ with gen_ai_col1:
 
 if gen_ai_summary:
     if not api_key:
-        st.error("Please enter your OpenAI API key.")
+        st.error("Please enter your OpenAI API key (or set OPENAI_API_KEY in Secrets).")
     elif not st.session_state.run_ready:
         st.error("Run a model first (Supervised/Unsupervised), then generate the summary.")
     else:
@@ -498,12 +535,13 @@ if st.session_state.run_ready and 'business_summary_text' in locals() and busine
 with st.expander("What do these controls do?"):
     st.markdown("""
 - **Upload**: Provide your exported log file. The app auto-detects delimiter/encoding and ignores corrupt rows.
+- **Columns to summarize**: Pick numeric columns for quick descriptive stats; safe against missing columns.
 - **Labels (optional)**: If your file has ground truth (e.g., `BENIGN`/`ATTACK`), pick it to train/evaluate a supervised model.
 - **Supervised (RandomForest)**: Shows precision/recall/F1, confusion matrix, and top features driving decisions.
-- **Unsupervised (IsolationForest)**: Flags outliers without labels. Use **Contamination** to tune the expected anomaly rate.
-- **Sanity Panel**: Confirms the app is ready for AI generation and downloads; shows total, anomalies, and rate.
-- **OpenAI Executive Summary**: Generates a polished, board-ready narrative with insights and a mitigation plan. Your key is used only for this request.
-- **Business Charts & Downloads**: Distribution, score histogram, time trend (if available), and downloads (Markdown + PNGs).
+- **Unsupervised (IsolationForest)**: Flags outliers without labels. Tune **Contamination** to set expected anomaly rate.
+- **Sanity Panel**: Confirms readiness and shows core figures (Total, Anomalies, Rate).
+- **OpenAI Executive Summary**: Generates a polished, board-ready narrative with insights and a mitigation plan.
+- **Downloads**: Anomalies CSV, PNG charts, and Markdown summaries.
 """)
 
 st.info("Tip: If too many rows are marked anomalous, reduce **contamination**. If none are flagged, increase it.")

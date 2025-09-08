@@ -118,39 +118,57 @@ Keep jargon minimal. Avoid code. No preambles or closings.
 """
 
 # ------------------------------------------------------------
-# OpenAI client (proxies-safe) + summarize with new/old SDKs
+# OpenAI client (proxies-safe) + robust summarize (new/old SDKs)
 # ------------------------------------------------------------
 def _make_openai_client(api_key: str):
     """Create an OpenAI client without passing 'proxies' (avoids httpx>=0.28 issue)."""
     if not NEW_SDK:
         return None
-    import httpx  # openai>=1.0 depends on httpx; available on Streamlit Cloud
+    import httpx  # available in Streamlit Cloud
     http_client = httpx.Client(timeout=60.0)  # ⚠️ do NOT pass 'proxies'
     return OpenAI(api_key=api_key, http_client=http_client)
 
 def openai_summarize(api_key: str, model: str, prompt: str) -> str:
     """
-    Uses new SDK (Responses API) when available; otherwise falls back to the old
-    ChatCompletion API if only the legacy SDK is installed.
+    Robust summary sequence:
+      1) Try new-SDK Chat Completions (most stable in 1.x)
+      2) Try new-SDK Responses API (if present)
+      3) Fallback to old SDK ChatCompletion (<1.0)
     """
+    # ---- New SDK path ----
     if NEW_SDK:
         client = _make_openai_client(api_key)
-        resp = client.responses.create(
-            model=model,  # e.g., "gpt-4o-mini"
-            input=[{"role": "user", "content": prompt}],
-        )
-        text = getattr(resp, "output_text", None)
-        if not text:
-            try:
-                text = resp.choices[0].message.content[0].text
-            except Exception:
-                text = "Unable to parse model output."
-        return text
 
-    # ---- Legacy fallback (<1.0) ----
+        # 1) Chat Completions (new SDK)
+        try:
+            resp = client.chat.completions.create(
+                model=model,  # e.g., "gpt-4o-mini" or "gpt-4o"
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.choices[0].message.content
+        except Exception:
+            pass
+
+        # 2) Responses API (if available in this build)
+        try:
+            resp = client.responses.create(
+                model=model,
+                input=[{"role": "user", "content": prompt}],
+            )
+            text = getattr(resp, "output_text", None)
+            if text:
+                return text
+            try:
+                return resp.choices[0].message.content[0].text
+            except Exception:
+                return "Unable to parse model output."
+        except Exception:
+            pass
+
+    # ---- Legacy SDK fallback (<1.0) ----
     openai_legacy.api_key = api_key
     resp = openai_legacy.ChatCompletion.create(
-        model=model,  # if needed, switch to "gpt-3.5-turbo" on older stacks
+        model=model,  # if this errors, switch to "gpt-3.5-turbo"
         messages=[{"role": "user", "content": prompt}],
     )
     return resp["choices"][0]["message"]["content"]

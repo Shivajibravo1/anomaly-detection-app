@@ -16,7 +16,7 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
-# OpenAI SDK (Responses API). requirements.txt should pin openai>=1.0
+# OpenAI SDK (Responses API) — requires openai>=1.0 in requirements.txt
 from openai import OpenAI
 
 st.set_page_config(page_title="Network Log Anomaly Detection", layout="wide")
@@ -25,11 +25,11 @@ st.caption("Robust loader, business charts, safe stats, downloads, and an OpenAI
 
 # --- Session state for run results & summaries ---
 if "run_ready" not in st.session_state:
-    st.session_state.run_ready = False  # becomes True after a model run
+    st.session_state.run_ready = False
 if "ctx" not in st.session_state:
-    st.session_state.ctx = {}           # stores total, anomalies, pct, etc.
+    st.session_state.ctx = {}
 if "ai_summary" not in st.session_state:
-    st.session_state.ai_summary = None  # stores last AI summary text
+    st.session_state.ai_summary = None
 
 # ------------------------------------------------------------------------------------
 # Utilities
@@ -127,17 +127,17 @@ def openai_summarize(api_key: str, model: str, prompt: str) -> str:
 
 # --- Safe numeric summary helpers (prevents KeyError) ---
 def safe_numeric_subset(df: pd.DataFrame, cols) -> pd.DataFrame:
-    """Return only existing, numeric columns from `cols`. Empty DF if none."""
-    if cols is None:
+    """Return only existing numeric columns from cols; empty DF if none."""
+    if not cols:
         return pd.DataFrame()
-    wanted = [c for c in list(cols) if c in df.columns]
-    if not wanted:
+    present = [c for c in cols if c in df.columns]
+    if not present:
         return pd.DataFrame()
-    numeric = df[wanted].select_dtypes(include="number")
+    numeric = df[present].select_dtypes(include="number")
     return numeric if not numeric.empty else pd.DataFrame()
 
 def concise_stats(df: pd.DataFrame, cols) -> pd.DataFrame:
-    """describe().T + missing% for a safe numeric subset."""
+    """describe().T + missing% on a safe subset (prevents KeyError)."""
     sub = safe_numeric_subset(df, cols)
     if sub.empty:
         return pd.DataFrame()
@@ -190,17 +190,22 @@ for c in time_like_cols:
 # Quick stats selector (SAFE)
 # ------------------------------------------------------------------------------------
 numeric_options = sorted(df.select_dtypes(include="number").columns.tolist())
+
 selected_num_cols = st.multiselect(
     "Columns to summarize (numeric only)",
     options=numeric_options,
     default=numeric_options[: min(6, len(numeric_options))],
-    help="Pick numeric columns to see quick stats. Empty if none."
+    help="Pick numeric columns to see quick stats."
 )
+
+# Intersect selection with current numeric columns to avoid stale widget state
+selected_num_cols = [c for c in selected_num_cols if c in numeric_options]
+
+st.subheader("📋 Quick Numeric Summary")
 stats_df = concise_stats(df, selected_num_cols)
 if stats_df.empty:
     st.warning("No numeric columns available from the current selection to summarize.")
 else:
-    st.subheader("📋 Quick Numeric Summary (safe)")
     st.dataframe(stats_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------------
@@ -446,7 +451,7 @@ if st.session_state.run_ready and st.session_state.ctx:
     col_a.metric("Mode", c.get("mode", "-"))
     col_b.metric("Total", f"{c.get('total', 0):,}")
     col_c.metric("Anomalies", f"{c.get('anomalies', 0):,}")
-    col_d.metric("Anomaly Rate", f"{c.get('pct', 0.0):.2f}%")
+    col_d.metric("Anomaly Rate", f"{c.get('pct', 0.0)::.2f}%")
     st.success("Ready for AI summary and downloads.")
 else:
     st.warning("Run a model first (Supervised or Unsupervised) to populate key figures.")

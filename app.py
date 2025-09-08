@@ -16,8 +16,15 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
-# OpenAI SDK (Responses API) — requires openai>=1.0 in requirements.txt
-from openai import OpenAI
+# ------------------------------------------------------------
+# OpenAI SDK import: prefer new SDK (>=1.0), fallback to old
+# ------------------------------------------------------------
+try:
+    from openai import OpenAI  # new SDK
+    NEW_SDK = True
+except Exception:
+    import openai as openai_legacy  # old SDK
+    NEW_SDK = False
 
 st.set_page_config(page_title="Anomaly Detection Application", layout="wide")
 st.title("🔍 Anomaly Detection Application by Shivaji P, IT PM")
@@ -110,20 +117,43 @@ Write in a confident, professional tone. Use **5 sections** with bold labels:
 Keep jargon minimal. Avoid code. No preambles or closings.
 """
 
+# ------------------------------------------------------------
+# OpenAI client (proxies-safe) + summarize with new/old SDKs
+# ------------------------------------------------------------
+def _make_openai_client(api_key: str):
+    """Create an OpenAI client without passing 'proxies' (avoids httpx>=0.28 issue)."""
+    if not NEW_SDK:
+        return None
+    import httpx  # openai>=1.0 depends on httpx; available on Streamlit Cloud
+    http_client = httpx.Client(timeout=60.0)  # ⚠️ do NOT pass 'proxies'
+    return OpenAI(api_key=api_key, http_client=http_client)
+
 def openai_summarize(api_key: str, model: str, prompt: str) -> str:
-    """Call OpenAI Responses API and return plain text."""
-    client = OpenAI(api_key=api_key)
-    resp = client.responses.create(
-        model=model,  # e.g., "gpt-4o-mini"
-        input=[{"role": "user", "content": prompt}],
+    """
+    Uses new SDK (Responses API) when available; otherwise falls back to the old
+    ChatCompletion API if only the legacy SDK is installed.
+    """
+    if NEW_SDK:
+        client = _make_openai_client(api_key)
+        resp = client.responses.create(
+            model=model,  # e.g., "gpt-4o-mini"
+            input=[{"role": "user", "content": prompt}],
+        )
+        text = getattr(resp, "output_text", None)
+        if not text:
+            try:
+                text = resp.choices[0].message.content[0].text
+            except Exception:
+                text = "Unable to parse model output."
+        return text
+
+    # ---- Legacy fallback (<1.0) ----
+    openai_legacy.api_key = api_key
+    resp = openai_legacy.ChatCompletion.create(
+        model=model,  # if needed, switch to "gpt-3.5-turbo" on older stacks
+        messages=[{"role": "user", "content": prompt}],
     )
-    text = getattr(resp, "output_text", None)
-    if not text:
-        try:
-            text = resp.choices[0].message.content[0].text
-        except Exception:
-            text = "Unable to parse model output."
-    return text
+    return resp["choices"][0]["message"]["content"]
 
 # --- Safe numeric summary helpers (prevents KeyError) ---
 def safe_numeric_subset(df: pd.DataFrame, cols) -> pd.DataFrame:

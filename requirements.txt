@@ -10,3 +10,4 @@ kaleido==0.2.1
 
 # OpenAI SDK (new Responses API)
 openai==1.40.1
+httpx==0.27.2
